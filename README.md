@@ -56,8 +56,6 @@ Unlike gzip_vary, if a Vary header exists for the original response, it will app
 
 Hanada im@hanada.info
 
-This module is based on [ngx_http_gunzip_module](https://nginx.org/en/docs/http/ngx_http_gunzip_module.html), one of nginx core modules and [ngx_unbrotli](https://github.com/clyfish/ngx_unbrotli), a nginx module for brotli decompression.
-
 # License
 
 This Nginx module is licensed under [BSD 2-Clause License](LICENSE).
