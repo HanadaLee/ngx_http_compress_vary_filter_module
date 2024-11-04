@@ -15,8 +15,8 @@ typedef struct {
 
 
 static ngx_int_t ngx_http_compress_vary_header_filter(ngx_http_request_t *r);
-ngx_http_compress_vary_filter_create_conf(ngx_conf_t *cf);
-ngx_http_compress_vary_filter_merge_conf(ngx_conf_t *cf,
+static void *ngx_http_compress_vary_filter_create_conf(ngx_conf_t *cf);
+static char *ngx_http_compress_vary_filter_merge_conf(ngx_conf_t *cf,
     void *parent, void *child);
 static ngx_int_t ngx_http_compress_vary_filter_init(ngx_conf_t *cf);
 
@@ -140,7 +140,8 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
 
                     for (j = 0; j < unique_values.nelts; j++) {
                         if (token.len == value[j].len &&
-                            ngx_strncasecmp(token.data, value[j].data, token.len) == 0)
+                            ngx_strncasecmp(token.data,
+                                value[j].data, token.len) == 0)
                         {
                             found = 1;
                             break;
@@ -157,7 +158,8 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
                         v->len = token.len;
 
                         if (token.len == accept_encoding.len &&
-                            ngx_strncasecmp(token.data, accept_encoding.data, token.len) == 0)
+                            ngx_strncasecmp(token.data,
+                                accept_encoding.data, token.len) == 0)
                         {
                             has_accept_encoding = 1;
                         }
