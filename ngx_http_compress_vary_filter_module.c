@@ -1,41 +1,25 @@
+
+/*
+ * Copyright (c) Hanada
+ */
+
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+
 
 typedef struct {
     ngx_flag_t  compress_vary;
 } ngx_http_compress_vary_filter_conf_t;
 
+
 static ngx_int_t ngx_http_compress_vary_header_filter(ngx_http_request_t *r);
+ngx_http_compress_vary_filter_create_conf(ngx_conf_t *cf);
+ngx_http_compress_vary_filter_merge_conf(ngx_conf_t *cf,
+    void *parent, void *child);
 static ngx_int_t ngx_http_compress_vary_filter_init(ngx_conf_t *cf);
 
-static void *
-ngx_http_compress_vary_filter_create_conf(ngx_conf_t *cf)
-{
-    ngx_http_compress_vary_filter_conf_t  *conf;
-
-    conf = ngx_pcalloc(cf->pool,
-        sizeof(ngx_http_compress_vary_filter_conf_t));
-    if (conf == NULL) {
-        return NULL;
-    }
-
-    conf->compress_vary = NGX_CONF_UNSET;
-
-    return conf;
-}
-
-static char *
-ngx_http_compress_vary_filter_merge_conf(ngx_conf_t *cf,
-    void *parent, void *child)
-{
-    ngx_http_compress_vary_filter_conf_t *prev = parent;
-    ngx_http_compress_vary_filter_conf_t *conf = child;
-
-    ngx_conf_merge_value(conf->compress_vary, prev->compress_vary, 0);
-
-    return NGX_CONF_OK;
-}
 
 static ngx_command_t  ngx_http_compress_vary_filter_commands[] = {
 
@@ -48,6 +32,7 @@ static ngx_command_t  ngx_http_compress_vary_filter_commands[] = {
 
       ngx_null_command
 };
+
 
 static ngx_http_module_t  ngx_http_compress_vary_filter_module_ctx = {
     NULL,                                       /* preconfiguration */
@@ -62,6 +47,7 @@ static ngx_http_module_t  ngx_http_compress_vary_filter_module_ctx = {
     ngx_http_compress_vary_filter_create_conf,  /* create location configuration */
     ngx_http_compress_vary_filter_merge_conf    /* merge location configuration */
 };
+
 
 ngx_module_t  ngx_http_compress_vary_filter_module = {
     NGX_MODULE_V1,
@@ -78,11 +64,21 @@ ngx_module_t  ngx_http_compress_vary_filter_module = {
     NGX_MODULE_V1_PADDING
 };
 
+
 static ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
+
 
 static ngx_int_t
 ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
 {
+    ngx_list_part_t    *part;
+    ngx_table_elt_t    *header;
+    ngx_uint_t          i, j;
+    ngx_array_t         unique_values;
+    ngx_str_t          *value;
+    ngx_str_t           accept_encoding = ngx_string("Accept-Encoding");
+    ngx_uint_t          has_accept_encoding = 0;
+
     ngx_http_compress_vary_filter_conf_t  *conf;
 
     conf = ngx_http_get_module_loc_conf(r,
@@ -92,22 +88,12 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-    ngx_list_part_t            *part;
-    ngx_table_elt_t            *header;
-    ngx_uint_t                  i, j;
-    ngx_array_t                 values;
-    ngx_array_t                 unique_values;
-    ngx_str_t                  *value;
-    ngx_uint_t                  n;
-    ngx_str_t                   token;
-    ngx_uint_t                  found;
-
-    if (ngx_array_init(&values,
-        r->pool, 4, sizeof(ngx_str_t)) != NGX_OK) {
+    if (ngx_array_init(&unique_values, r->pool, 4,
+        sizeof(ngx_str_t)) != NGX_OK)
+    {
         return NGX_ERROR;
     }
 
-    /* 收集所有的Vary头部值并移除现有的Vary头 */
     part = &r->headers_out.headers.part;
     header = part->elts;
 
@@ -127,112 +113,75 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
             continue;
         }
 
-        if (header[i].key.len == 4
-            && ngx_strcasecmp(header[i].key.data, (u_char *)"Vary") == 0)
-        {
+        if (header[i].key.len == 4 &&
+            ngx_strncasecmp(header[i].key.data, (u_char *)"Vary", 4) == 0) {
 
-            /* 处理header[i].value */
             u_char *p = header[i].value.data;
             u_char *last = p + header[i].value.len;
 
             while (p < last) {
-                /* 跳过前导空白和逗号 */
                 while (p < last && (*p == ' ' || *p == '\t' || *p == ',')) {
                     p++;
                 }
 
                 u_char *start = p;
 
-                /* 找到token的结束位置 */
                 while (p < last && *p != ',' && *p != ' ' && *p != '\t') {
                     p++;
                 }
 
                 if (start != p) {
-                    /* 得到一个token */
+                    ngx_str_t token;
                     token.data = start;
                     token.len = p - start;
-                    found = 0;
+
+                    ngx_uint_t found = 0;
                     value = unique_values.elts;
-                    ngx_str_t *v = ngx_array_push(&values);
-                    if (v == NULL) {
-                        return NGX_ERROR;
+
+                    for (j = 0; j < unique_values.nelts; j++) {
+                        if (token.len == value[j].len &&
+                            ngx_strncasecmp(token.data, value[j].data, token.len) == 0)
+                        {
+                            found = 1;
+                            break;
+                        }
                     }
 
-                    v->data = start;
-                    v->len = p - start;
+                    if (!found) {
+                        ngx_str_t *v = ngx_array_push(&unique_values);
+                        if (v == NULL) {
+                            return NGX_ERROR;
+                        }
+
+                        v->data = token.data;
+                        v->len = token.len;
+
+                        if (token.len == accept_encoding.len &&
+                            ngx_strncasecmp(token.data, accept_encoding.data, token.len) == 0)
+                        {
+                            has_accept_encoding = 1;
+                        }
+                    }
                 }
             }
 
-            /* 移除此头部 */
             header[i].hash = 0;
             ngx_str_null(&header[i].key);
             ngx_str_null(&header[i].value);
         }
     }
 
-    /* 移除重复值（不区分大小写） */
-    if (ngx_array_init(&unique_values, r->pool, values.nelts, sizeof(ngx_str_t)) != NGX_OK) {
-        return NGX_ERROR;
+    if (r->gzip_vary && !has_accept_encoding) {
+        ngx_str_t *v = ngx_array_push(&unique_values);
+        if (v == NULL) {
+            return NGX_ERROR;
+        }
+
+        v->data = accept_encoding.data;
+        v->len = accept_encoding.len;
     }
 
-    value = values.elts;
-
-    for (i = 0; i < values.nelts; i++) {
-        ngx_str_t *v = &value[i];
-        ngx_str_t *uv = unique_values.elts;
-        ngx_uint_t found = 0;
-
-        for (j = 0; j < unique_values.nelts; j++) {
-            if (v->len == uv[j].len &&
-                ngx_strncasecmp(v->data, uv[j].data, v->len) == 0)
-            {
-                found = 1;
-                break;
-            }
-        }
-
-        if (!found) {
-            ngx_str_t *u = ngx_array_push(&unique_values);
-            if (u == NULL) {
-                return NGX_ERROR;
-            }
-
-            *u = *v;
-        }
-    }
-
-    ngx_str_t accept_encoding = ngx_string("Accept-Encoding");
-
-    /* 如果r->gzip_vary为真，确保'Accept-Encoding'在列表中 */
-    if (r->gzip_vary) {
-        value = unique_values.elts;
-        n = unique_values.nelts;
-        ngx_uint_t found = 0;
-
-        for (i = 0; i < n; i++) {
-            if (value[i].len == accept_encoding.len &&
-                ngx_strncasecmp(value[i].data,
-                    accept_encoding.data, accept_encoding.len) == 0) {
-                found = 1;
-                break;
-            }
-        }
-
-        if (!found) {
-            /* 添加'Accept-Encoding' */
-            ngx_str_t *v = ngx_array_push(&unique_values);
-            if (v == NULL) {
-                return NGX_ERROR;
-            }
-
-            v->data = accept_encoding.data;
-            v->len = accept_encoding.len;
-        }
-    }
-
-    /* 构建新的Vary头部值 */
-    n = unique_values.nelts;
+    ngx_uint_t n = unique_values.nelts;
     value = unique_values.elts;
     size_t total_len = 0;
 
@@ -243,6 +192,10 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
         }
     }
 
+    if (total_len == 0) {
+        return ngx_http_next_header_filter(r);
+    }
+
     u_char *data = ngx_pnalloc(r->pool, total_len);
     if (data == NULL) {
         return NGX_ERROR;
@@ -251,14 +204,13 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
     u_char *p = data;
 
     for (i = 0; i < n; i++) {
-        p = ngx_copy(p, value[i].data, value[i].len);
+        p = ngx_cpymem(p, value[i].data, value[i].len);
         if (i != n - 1) {
             *p++ = ',';
             *p++ = ' ';
         }
     }
 
-    /* 添加新的Vary头部 */
     ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
     if (h == NULL) {
         return NGX_ERROR;
@@ -271,6 +223,37 @@ ngx_http_compress_vary_header_filter(ngx_http_request_t *r)
 
     return ngx_http_next_header_filter(r);
 }
+
+
+static void *
+ngx_http_compress_vary_filter_create_conf(ngx_conf_t *cf)
+{
+    ngx_http_compress_vary_filter_conf_t  *conf;
+
+    conf = ngx_pcalloc(cf->pool,
+        sizeof(ngx_http_compress_vary_filter_conf_t));
+    if (conf == NULL) {
+        return NULL;
+    }
+
+    conf->compress_vary = NGX_CONF_UNSET;
+
+    return conf;
+}
+
+
+static char *
+ngx_http_compress_vary_filter_merge_conf(ngx_conf_t *cf,
+    void *parent, void *child)
+{
+    ngx_http_compress_vary_filter_conf_t *prev = parent;
+    ngx_http_compress_vary_filter_conf_t *conf = child;
+
+    ngx_conf_merge_value(conf->compress_vary, prev->compress_vary, 0);
+
+    return NGX_CONF_OK;
+}
+
 
 static ngx_int_t
 ngx_http_compress_vary_filter_init(ngx_conf_t *cf)
